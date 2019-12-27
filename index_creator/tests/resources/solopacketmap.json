@@ -1,0 +1,46 @@
+{
+    "mappings": {
+        "properties": {
+            "timestamp": {
+                "type": "date",
+                "format": "date_hour_minute_second"
+            },
+            "instrument": {
+                "type": "keyword"
+            },
+            "apid": {
+                "type": "integer"
+            },
+            "destination_id": {
+                "type": "integer"
+            },
+            "obt": {
+                "type": "date",
+                "format": "date_hour_minute_second_millis"
+            },
+            "no_sync_flag": {
+                "type": "boolean"
+            },
+            "ssc": {
+                "type": "integer"
+            },
+            "packet_type": {
+                "type": "integer"
+            },
+            "packet_subtype": {
+                "type": "integer"
+            },
+            "scos2000_pi1": {
+                "type": "integer",
+                "index": "false"
+            },
+            "spacecraft": {
+                "type": "boolean"
+            },
+            "content": {
+                "type": "binary",
+                "index": "false"
+            }
+        }
+    }
+}
