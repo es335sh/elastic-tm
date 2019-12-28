@@ -2,20 +2,108 @@
 import os
 import sys
 import logging
+import datetime
 import argparse
 from argparse import Namespace
-
+from datetime import timedelta
 from elasticsearch import Elasticsearch
 
-def main():
+
+EPOCH = datetime.datetime(2000, 1, 1, 0, 0, 0)
+
+def get_instrument_from_apid(apid):
+    apid_table = [
+        ('epd', range(800, 912)),  ('epd', range(1600, 1616)),
+        ('eui', range(912, 1008)),
+        ('mag', range(1008, 1072)),
+        ('met', range(1072, 1152)),
+        ('phi', range(1152, 1200)),
+        ('rpw', range(1200, 1312)),
+        ('shi', range(1312, 1360)),
+        ('spi', range(1360, 1440)), ('spi', range(1616, 1680)),
+        ('stx', range(1440, 1520)),
+        ('swa', range(1520, 1600))]
+
+    for tuple in apid_table:
+        if int(apid) in tuple[1]:
+            return tuple[0]
+
+    raise Exception('Unknown APID')
+
+
+def build_packet_json(packet_name, packet_content):
+
+    pktm, apid, obt, no_sync_flag, destination_id, ssc_type, psubtype, scos2k_pi1, *unexpected = packet_name.split('_')
+    ssc, ptype = ssc_type.split('.')
+
+    # Not interested in OBT's second fractions right now
+    num_of_seconds_since_epoch = int(obt[0:8], 16)
+    converted_obt = EPOCH + timedelta(seconds=num_of_seconds_since_epoch)
+
+    try:
+        packet_dict = {
+            'timestamp': datetime.datetime.utcnow().isoformat(),
+            'instrument': get_instrument_from_apid(apid),
+            'apid': apid,
+            'destination_id': destination_id,
+            'obt': converted_obt.isoformat(),
+            'no_sync_flag': no_sync_flag,
+            'ssc': ssc,
+            'packet_type': ptype,
+            'packet_subtype': psubtype,
+            'scos2000_pi1': scos2k_pi1,
+            'spacecraft': True,
+            'content': packet_content
+        }
+
+        return packet_dict
+
+    except:
+        logging.error('Error when building packet json {}'.format(packet_name))
+
+
+def ingest_file(path, packet_file_name):
+    logging.info("Ingesting packet " + packet_file_name)
+    full_path_to_file = path + os.sep + packet_file_name
+    with open(full_path_to_file, 'r') as f:
+        packet_content = f.read()
+        packet_json = build_packet_json(packet_file_name, packet_content)
+        logging.info(packet_json)
+        elastic_conn.create(index=args.index_name, refresh='wait_for', body=packet_json)
+
+
+def ingest_directory(data_dir):
     # traverse root directory, and list directories as dirs and files as files
-    for root, dirs, files in os.walk(args.directory):
-        path = root.split(os.sep)
-        print((len(path) - 1) * '---', os.path.basename(root))
+    for root, dirs, files in os.walk(data_dir):
         for file in files:
-            print(len(path) * '---', file)
+            if file.startswith('PKTM'):
+                ingest_file(root, file)
 
 
+def alt_main():
+    global elastic_conn
+    if elastic_conn is None:
+        elastic_conn = Elasticsearch([args.host],
+                                     port=args.port,
+                                     sniff_on_start=True,
+                                     sniff_on_connection_fail=True,
+                                     maxsize=10,
+                                     http_compress=True)
+
+    if args.directory:
+        ingest_directory(args.directory)
+    elif args.packetfile:
+        ingest_file(args.packetfile)
+    else:
+        print("Either a file or directory was expected. None was provided. Exiting...")
+        sys.exit(1)
+
+##
+#  Entry point
+##
+
+
+elastic_conn = None
 program = os.path.basename(sys.argv[0])
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
@@ -41,6 +129,5 @@ if __name__ == "__main__":
         print("-d and -f are mutually exclusive ...")
         sys.exit(2)
 
-    print(args.directory)
-    main()
+    alt_main()
     sys.exit(0)
