@@ -10,9 +10,12 @@ from elasticsearch import Elasticsearch
 
 
 EPOCH = datetime.datetime(2000, 1, 1, 0, 0, 0)
+FRACTIONS_PER_SECOND = 65536
+
 
 def get_instrument_from_apid(apid):
     apid_table = [
+        ('sc', range(168, 169)),
         ('epd', range(800, 912)),  ('epd', range(1600, 1616)),
         ('eui', range(912, 1008)),
         ('mag', range(1008, 1072)),
@@ -31,23 +34,29 @@ def get_instrument_from_apid(apid):
     raise Exception('Unknown APID')
 
 
-def build_packet_json(packet_name, packet_content):
+def get_datetime_from_obt(obt_string):
+    num_of_seconds_since_epoch = int(obt_string[0:8], 16)
+    fractions = int(obt_string[8:], 16)
+    nanoseconds = fractions * pow(10, 9) / FRACTIONS_PER_SECOND
+    milliseconds = int(nanoseconds / pow(10, 6))
+    obt_datetime = EPOCH + timedelta(seconds=num_of_seconds_since_epoch) + timedelta(milliseconds=milliseconds)
+    return obt_datetime.strftime("%Y-%m-%dT%H:%M:%S.{}".format(milliseconds))
 
+
+def build_packet_json(packet_name, packet_content):
     pktm, apid, obt, no_sync_flag, destination_id, ssc_type, psubtype, scos2k_pi1, *unexpected = packet_name.split('_')
     ssc, ptype = ssc_type.split('.')
-
-    # Not interested in OBT's second fractions right now
-    num_of_seconds_since_epoch = int(obt[0:8], 16)
-    converted_obt = EPOCH + timedelta(seconds=num_of_seconds_since_epoch)
+    no_sync_flag_boolean = 'false' if no_sync_flag == 0 else 'true'
+    converted_obt = get_datetime_from_obt(obt)
 
     try:
         packet_dict = {
-            'timestamp': datetime.datetime.utcnow().isoformat(),
+            'timestamp': datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
             'instrument': get_instrument_from_apid(apid),
             'apid': apid,
             'destination_id': destination_id,
-            'obt': converted_obt.isoformat(),
-            'no_sync_flag': no_sync_flag,
+            'obt': converted_obt,
+            'no_sync_flag': no_sync_flag_boolean,
             'ssc': ssc,
             'packet_type': ptype,
             'packet_subtype': psubtype,
@@ -69,7 +78,8 @@ def ingest_file(path, packet_file_name):
         packet_content = f.read()
         packet_json = build_packet_json(packet_file_name, packet_content)
         logging.info(packet_json)
-        elastic_conn.create(index=args.index_name, refresh='wait_for', body=packet_json)
+        # See https://stackoverflow.com/questions/51724443/elasticsearch-doc-type-and-parent-id
+        elastic_conn.index(index=args.index_name, refresh=False, body=packet_json, doc_type='_doc')
 
 
 def ingest_directory(data_dir):
@@ -85,8 +95,8 @@ def alt_main():
     if elastic_conn is None:
         elastic_conn = Elasticsearch([args.host],
                                      port=args.port,
-                                     sniff_on_start=True,
-                                     sniff_on_connection_fail=True,
+                                     sniff_on_start=False,            # TODO False because using Docker
+                                     sniff_on_connection_fail=False,  # TODO False because using Docker
                                      maxsize=10,
                                      http_compress=True)
 
@@ -95,7 +105,7 @@ def alt_main():
     elif args.packetfile:
         ingest_file(args.packetfile)
     else:
-        print("Either a file or directory was expected. None was provided. Exiting...")
+        print("Either a file or directory was expected. None of them was provided. Exiting...")
         sys.exit(1)
 
 ##
