@@ -15,7 +15,8 @@ FRACTIONS_PER_SECOND = 65536
 
 def get_instrument_from_apid(apid):
     apid_table = [
-        ('sc', range(168, 169)),
+        ('sc', range(161, 664)),
+        ('tco', range(1966, 1967)),
         ('epd', range(800, 912)),  ('epd', range(1600, 1616)),
         ('eui', range(912, 1008)),
         ('mag', range(1008, 1072)),
@@ -117,7 +118,7 @@ elastic_conn = None
 program = os.path.basename(sys.argv[0])
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger('IndexCreator')
+    logger = logging.getLogger('DataIngestor')
 
     program_description = """
             Create an index in Elasticsearch. 
